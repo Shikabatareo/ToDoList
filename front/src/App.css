@@ -1,0 +1,176 @@
+body {
+  background-color: #1C1C1C ;
+  color: white;
+}
+.container {
+
+max-width: 800px;
+margin: auto;
+position: relative;
+}
+
+.container-tasks {
+  display: flex;
+  justify-content: space-between;
+  flex-direction: column;
+  align-items: center;
+  height: 400px;
+  position: relative;
+
+}
+.h1 {
+  text-align: center;
+}
+.container-detail-form {
+
+  
+}
+.detail-form {
+  background-color: #1C1C1C;
+  border: #550080 solid;
+  position: absolute;
+  border-radius: 15px;
+  display: flex;
+  flex-direction: column;
+  height: 200px;
+  padding: 25px;
+  left: 145px;
+  top: 200px;
+  font-size: 20px;
+  font-family: Arial, Helvetica, sans-serif;
+
+
+  
+}
+.detail-form h2 {
+  text-align: center;
+}
+.detail-form button {
+  position: absolute;
+  right: 0;
+  top: 2px;
+}
+.p-task {
+  text-align: center;
+}
+.container-form {
+  display: flex;
+  justify-content: center;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  background-color: black;
+  padding: 20px;
+  border-radius: 20px;
+  height: 350px;
+  position: fixed;
+  z-index: 10;
+}
+.form input,textarea,button {
+  background-color: black;
+  border-radius: 5px;
+  padding: 10px;
+  margin-bottom: 20px;
+  color:white;
+  border: #550080 solid;
+  font-size: 20px;
+  margin-left: 50px;
+}
+.form .button-close {
+  width: 40px;
+  position: absolute;
+  right: 20px;
+  bottom: 0;
+}
+.section-tasks {
+  text-align: right;
+}
+.list-task {
+
+text-align: left;
+}
+.task {
+
+}
+.sub-task {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 500px;
+  margin-left: 50px;
+}
+.container-task {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 500px;
+}
+.add-task {
+  color:white;
+  background-color: #550080;
+  border-radius: 30px;
+  padding: 10px;
+  width: 50px;
+  height: 47px;
+  position: absolute;
+  right: 0;
+}
+.ico-img {
+  cursor: pointer;
+}
+.hr {
+  background-color: #550080;
+  height: 2px;
+  border: none;
+}
+.checkbox-task {
+  display: flex;
+  align-items: center;
+}
+.checkbox-task input[type="checkbox"] {
+    position: absolute; 
+    opacity: 0;         
+    width: 0;           
+    height: 0;        
+    pointer-events: none;
+}
+.checkbox-task label {
+    position: relative; 
+    padding-left: 28px; 
+    cursor: pointer;
+    line-height: 20px; 
+    user-select: none; 
+}
+
+.checkbox-task label::before {
+    content: ''; 
+    position: absolute;
+    left: 0;
+    top: 0; 
+    width: 20px; 
+    height: 20px;
+    border: 2px solid #550080; 
+    border-radius: 4px; 
+    background-color: #1C1C1C; 
+}
+
+.checkbox-task label::after {
+    content: '';
+    position: absolute;
+    left: 7px; 
+    top: 3px;  
+    width: 8px; 
+    height: 14px;
+    border: solid white; 
+    border-width: 0 3px 3px 0;
+    transform: rotate(45deg); 
+    opacity: 0; 
+    transition: opacity 0.2s;
+}
+
+.checkbox-task input[type="checkbox"]:checked + label::after {
+    opacity: 1;
+}
+
