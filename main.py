@@ -1,6 +1,6 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, TIMESTAMP
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, TIMESTAMP, or_
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 import os
@@ -102,22 +102,32 @@ async def add_subtask(update: Update, context: CallbackContext):
     if len(args) < 2:
         await update.message.reply_text('Пожалуйста, укажите название родительской задачи и название подзадачи. Пример: /add_subtask Купить молоко Взять деньги')
         return
-    subtask_title = args[-1]
-    parent_task_name = ' '.join(args[:-1])
-    if not parent_task_name or not subtask_title:
-        await update.message.reply_text('Неверный формат команды. Пожалуйста, укажите название родительской задачи и название подзадачи. Пример: /add_subtask Купить молоко Взять деньги')
-        return
+    full_command_text = ' '.join(args)
+    parent_task_obj = None
+    subtask_title = None
+    parent_task_name = None
     with SessionLocal() as db:
-        parent_task = db.query(Task).filter(Task.title.ilike(parent_task_name)).first()
-        if not parent_task:
-            await update.message.reply_text(f'❌ Родительская задача с названием "{parent_task_name}" не найдена.')
+        all_parent_tasks = db.query(Task).filter(Task.parent_id == None).all()
+        sorted_parent_tasks = sorted(all_parent_tasks, key=lambda x: len(x.title),reverse=True)
+        for task in sorted_parent_tasks:
+            if full_command_text.lower().startswith(task.title.lower()):
+               if len(full_command_text) == len(task.title) or full_command_text[len(task.title)]== ' ':
+                   parent_task_obj = task
+                   parent_task_name = task.title
+                   subtask_title = full_command_text[len(parent_task_name):].strip()
+                   break
+        if not parent_task_obj:
+            await update.message.reply_text(f"❌ Родительская задача не найдена. Пожалуйста, убедитесь, что вы ввели полное и точное название родительской задачи.")
             return
+        if not subtask_title:
+             await update.message.reply_text("Пожалуйста, укажите название подзадачи.")
+             return
         fastapi_url = 'http://localhost:8000/tasks'
         payload = {
             "title": subtask_title,
             "description": f'Добавлено как подзадача для "{parent_task_name}" через Telegram',
             "due_date": None,
-            "parent_id": parent_task.id
+            "parent_id": parent_task_obj.id
         }
         try:
             async with httpx.AsyncClient() as client:
@@ -255,6 +265,9 @@ class TaskUpdate(BaseModel):
     due_date: datetime | None = None
     is_completed: bool | None = None 
     parent_id: int | None = None
+class TaskSearch(BaseModel):
+    query: str
+    priority_filter: int | None=None
 def get_db(): 
     db = SessionLocal()
     try:
@@ -290,6 +303,29 @@ def create_task(task:TaskCreate, db: Session = Depends(get_db)):
 @app.get('/tasks')
 def get_tasks(db: Session = Depends(get_db)):
     return db.query(Task).all()
+@app.get('/tasks/search')
+def search_tasks(
+    query = Query(...,description='Поисковый запрос'),
+    priority_filter = Query(None, description ="Фильтр по приоритету"),
+    db: Session = Depends(get_db)
+
+):
+    base_query = db.query(Task)
+    if query:
+        search_filter = or_(Task.title.ilike(f'%{query}%'), Task.description.ilike(f'%{query}%'))
+        base_query = base_query.filter(search_filter)
+    if priority_filter is not None:
+        base_query = base_query.filter(Task.priority == priority_filter)
+    matching_tasks = base_query.all()
+    results_dict = {task.id: task for task in matching_tasks}
+    parent_ids_to_fetch = {
+        task.parent_id for task in matching_tasks if task.parent_id is not None and task.parent_id not in results_dict
+    }
+    if parent_ids_to_fetch:
+        parent_tasks = db.query(Task).filter(Task.id.in_(parent_ids_to_fetch)).all()
+        for parent in parent_tasks:
+            results_dict[parent.id]=parent
+    return list(results_dict.values())
 
 @app.delete('/tasks/{task_id}')
 def delete_task(task_id, db: Session = Depends(get_db)):
