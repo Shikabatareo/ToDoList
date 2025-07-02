@@ -10,8 +10,16 @@ from telegram import Update
 import google.generativeai as genai
 from telegram.ext import  CommandHandler, CallbackContext
 import requests
-from telegram import Bot,Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
+from telegram import Bot,Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    ConversationHandler,
+    MessageHandler,
+    filters,
+    CallbackContext,
+)
 import json
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
@@ -55,17 +63,41 @@ class Task(Base):
 
 Base.metadata.create_all(bind=engine)
 
+(AWAITING_TASK_TITLE, AWAITING_SUBTASK_DATA, AWAITING_DELETE_TITLE) = range(3)
 
 async def start(update: Update, context: CallbackContext):
     user = update.effective_user
+    keyboard = [
+    [InlineKeyboardButton('Добавить задачу', callback_data='add_task')],
+    [InlineKeyboardButton('Удалить задачу', callback_data='delete_task')],
+    [InlineKeyboardButton("Добавить подзадачу", callback_data='add_subtask')],
+    [InlineKeyboardButton("Показать задачи", callback_data='show_tasks')],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_html(
-        f"Привет, {user.mention_html()}! 👋\n\nЯ твой бот-помощник для управления задачами."
+        f"Привет, {user.mention_html()}! 👋\n\nЯ твой бот-помощник для управления задачами.", reply_markup=reply_markup
     )
+async def button_handler(update:Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+    command = query.data
+    if command == 'add_task':
+        await query.message.reply_text('Пожалуйста, введите название новой задачи:')
+        return AWAITING_TASK_TITLE
+    elif command == 'delete_task':
+        await query.message.reply_text('Пожалуйста, введите название задачи, которую хотите удалить:')
+        return AWAITING_DELETE_TITLE
+    elif command == 'add_subtask':
+        await query.message.reply_text('Введите название родительской задачи, а затем, через пробел, название подзадачи:')
+        return AWAITING_SUBTASK_DATA
+    elif command == 'show_tasks':
+        await show_tasks(query,context)
+        return ConversationHandler.END
 
 async def add_task(update:Update, context:CallbackContext):
-    task_title = ' '.join(context.args)
+    task_title = update.message.text
     if not task_title:
-        await update.message.reply_text('Пожалуйста, укажите название задачи. Пример: /addtask Купить молоко')
+        await update.message.reply_text('Пожалуйста, укажите название задачи. Пример: Купить молоко')
         return
     fastapi_url = 'http://localhost:8000/tasks'
     payload = {
@@ -97,12 +129,9 @@ async def add_task(update:Update, context:CallbackContext):
         await update.message.reply_text(
             f"❌ Произошла непредвиденная ошибка: {e}"
         )
+    return ConversationHandler.END
 async def add_subtask(update: Update, context: CallbackContext):
-    args = context.args
-    if len(args) < 2:
-        await update.message.reply_text('Пожалуйста, укажите название родительской задачи и название подзадачи. Пример: /add_subtask Купить молоко Взять деньги')
-        return
-    full_command_text = ' '.join(args)
+    full_command_text = update.message.text
     parent_task_obj = None
     subtask_title = None
     parent_task_name = None
@@ -118,10 +147,10 @@ async def add_subtask(update: Update, context: CallbackContext):
                    break
         if not parent_task_obj:
             await update.message.reply_text(f"❌ Родительская задача не найдена. Пожалуйста, убедитесь, что вы ввели полное и точное название родительской задачи.")
-            return
+            return AWAITING_SUBTASK_DATA
         if not subtask_title:
              await update.message.reply_text("Пожалуйста, укажите название подзадачи.")
-             return
+             return AWAITING_SUBTASK_DATA
         fastapi_url = 'http://localhost:8000/tasks'
         payload = {
             "title": subtask_title,
@@ -151,11 +180,12 @@ async def add_subtask(update: Update, context: CallbackContext):
             await update.message.reply_text(
                 f"❌ Произошла непредвиденная ошибка: {e}"
             )
+        return ConversationHandler.END
 async def delete_task_command(update: Update, context: CallbackContext):
-    task_delete = " ".join(context.args)
+    task_delete = update.message.text
     if not task_delete:
         await update.message.reply_text(
-            "Пожалуйста, укажите название задачи для удаления. Пример: /deletetask Купить молоко"
+            "Пожалуйста, укажите название задачи для удаления. Пример: Купить молоко"
         )
         return
     
@@ -183,6 +213,7 @@ async def delete_task_command(update: Update, context: CallbackContext):
         await update.message.reply_text(
             f"❌ Произошла непредвиденная ошибка: {e}"
         )
+    return ConversationHandler.END
 async def show_tasks(update: Update, context: CallbackContext):
     message_text = "<b> Ваш список задач:</b>\n\n"
     with SessionLocal() as db: 
@@ -210,16 +241,27 @@ async def show_tasks(update: Update, context: CallbackContext):
                 task_lines.append("")
         message_text +='\n'.join(task_lines)
     await update.message.reply_html(message_text)
+async def cancel(update: Update, context: CallbackContext):
+    await update.message.reply_text('Действие отменено.')
+    return ConversationHandler.END
 @asynccontextmanager
 async def lifespan(app):
  
     print("Приложение запускается, настраиваем бота...")
 
+    conv_handler = ConversationHandler(entry_points=[CallbackQueryHandler(button_handler)],
+                                       states={AWAITING_TASK_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_task)],
+                                               
+                                               AWAITING_SUBTASK_DATA: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_subtask)],
+                                            AWAITING_DELETE_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, delete_task_command)],
+                                               },
+                                               fallbacks=[CommandHandler('cancel',cancel)]
+                                       )
+
+
     bot_application.add_handler(CommandHandler("start", start))
+    bot_application.add_handler(conv_handler)
     bot_application.add_handler(CommandHandler("tasks", show_tasks))
-    bot_application.add_handler(CommandHandler("add_task", add_task))
-    bot_application.add_handler(CommandHandler("delete_task", delete_task_command))
-    bot_application.add_handler(CommandHandler("add_subtask", add_subtask))
 
     await bot_application.initialize()
 
@@ -340,7 +382,7 @@ def delete_tasks_title(task_title, db:Session = Depends(get_db)):
     task_to_delete = db.query(Task).filter(Task.title.ilike(task_title)).all()
     tasks_to_delete_sort = sorted([task.id for task in task_to_delete],reverse=True)
     if not task_to_delete:
-      print('tasks not found')
+      raise HTTPException(status_code=404,detail='Task not found')
     for task_id in tasks_to_delete_sort:
         found_task = db.query(Task).filter(Task.id==task_id).first()
         if found_task:
