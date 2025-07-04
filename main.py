@@ -1,10 +1,10 @@
 from fastapi import FastAPI, HTTPException, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel,ConfigDict
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, TIMESTAMP, or_
 from sqlalchemy.orm import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker, Session,relationship
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from telegram import Update
 import google.generativeai as genai
@@ -20,6 +20,16 @@ from telegram.ext import (
     filters,
     CallbackContext,
 )
+from fastapi.security import OAuth2PasswordRequestForm
+from auth import (
+    get_password_hash,
+    verify_password,
+    create_access_token,
+    oauth2_scheme,
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+)
+from jose import JWTError, jwt
+from auth import SECRET_KEY, ALGORITHM
 import json
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
@@ -42,6 +52,24 @@ DATABASE_URL = 'postgresql://postgres:1337@localhost/tododb'
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit = False, autoflush=False, bind=engine, class_ =Session)
 Base = declarative_base()
+
+
+class UserCreate(BaseModel):
+    username: str
+    email: str
+    password: str
+class UserResponce(BaseModel):
+    id:int
+    username:str
+    email: str
+    class Config:
+        orm_mode = True
+class Token(BaseModel):
+    access_token:str
+    token_type: str
+class TokenData(BaseModel):
+    username: str
+
 class User(Base):
     __tablename__ = 'users'
     id = Column(Integer,primary_key=True,index=True)
@@ -49,6 +77,8 @@ class User(Base):
     email = Column(String(100),unique=True,nullable=False)
     password_hash = Column(String(128), nullable=False)
     telegram_chat_id = Column(String(50),unique=True)
+
+    tasks = relationship('Task',back_populates='owner', cascade='all, delete-orphan')
 class Task(Base): 
     __tablename__= 'tasks'
     id = Column(Integer, primary_key = True, index=True)
@@ -60,10 +90,11 @@ class Task(Base):
     is_completed = Column(Boolean, default=False)
     ai_comment = Column(String)
     parent_id = Column(Integer, ForeignKey('tasks.id', ondelete='CASCADE'), nullable=True, index = True)
-
+    owner = relationship('User', back_populates='tasks')
 Base.metadata.create_all(bind=engine)
 
 (AWAITING_TASK_TITLE, AWAITING_SUBTASK_DATA, AWAITING_DELETE_TITLE) = range(3)
+
 
 async def start(update: Update, context: CallbackContext):
     user = update.effective_user
@@ -293,7 +324,17 @@ origins = [
 
 app.add_middleware(CORSMiddleware,allow_origins=origins,allow_credentials=True,allow_methods=['*'], allow_headers=['*'])
 
-
+class TaskResponce(BaseModel):
+    id: int
+    title: str
+    description: str | None = None
+    priority: int
+    due_date: datetime | None = None
+    is_completed: bool
+    ai_comment: str | None = None
+    parent_id: int | None = None
+    user_id: int
+    model_config = ConfigDict(from_attributes=True)
 class TaskCreate(BaseModel):
     title: str
     description: str | None=None
@@ -333,18 +374,33 @@ def get_ai_comment(task_title:str)-> str:
         return "Произошла ошибка при обращении к ИИ."
 
 
-@app.post('/tasks')
-def create_task(task:TaskCreate, db: Session = Depends(get_db)):
-    db_task = Task(**task.dict())
+
+async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    try:
+        payload = jwt.decode(token,SECRET_KEY,algorithms=[ALGORITHM])
+        username = payload.get('sub')
+        if username is None:
+            print('Username not found')
+        token_data = TokenData(username=username)
+    except JWTError:
+        print('Token error')
+    user = db.query(User).filter(User.username==token_data.username).first()
+    if user is None:
+        print('User not found')
+    return user
+
+@app.post('/tasks',response_model=TaskResponce)
+def create_task(task:TaskCreate, db: Session = Depends(get_db), current_user:User = Depends(get_current_user)):
+    db_task = Task(**task.dict(),user_id=current_user.id)
     db_task.ai_comment = get_ai_comment(task.title)
     db.add(db_task)
     db.commit()
     db.refresh(db_task)
     return {'message': 'Task created', 'ai_advice':db_task.ai_comment, 'task': db_task}
 
-@app.get('/tasks')
-def get_tasks(db: Session = Depends(get_db)):
-    return db.query(Task).all()
+@app.get('/tasks', response_model=list[TaskResponce])
+def get_tasks(db: Session = Depends(get_db), current_user: User= Depends(get_current_user)):
+    return db.query(Task).filter(Task.user_id == current_user.id).all()
 @app.get('/tasks/search')
 def search_tasks(
     query = Query(...,description='Поисковый запрос'),
@@ -370,8 +426,8 @@ def search_tasks(
     return list(results_dict.values())
 
 @app.delete('/tasks/{task_id}')
-def delete_task(task_id, db: Session = Depends(get_db)):
-    db_task = db.query(Task).filter(Task.id == task_id).first()
+def delete_task(task_id, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    db_task = db.query(Task).filter(Task.id == task_id, Task.user_id==current_user.id).first()
     if db_task is None: 
         raise HTTPException(status_code=404,detail='Task not found')
     db.delete(db_task)
@@ -415,10 +471,12 @@ def uncomplete_task(task_id,db: Session = Depends(get_db)):
     return {"message: f'Task copmleted with id {task_id}'"}
 
 @app.put('/tasks/{task_id}')
-def update_task(task_id, task: TaskUpdate, db: Session = Depends(get_db)):
+def update_task(task_id, task: TaskUpdate, db: Session = Depends(get_db),current_user: User = Depends(get_current_user)):
     db_task = db.query(Task).filter(Task.id == task_id).first()
     if db_task is None:
         raise HTTPException(status_code=404, detail='Task not found')
+    if db_task.user_id !=current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this task")
     for field, value in task.dict().items():
         setattr(db_task, field, value)
     if task.title is not None and task.title !=db_task.title:
@@ -426,3 +484,28 @@ def update_task(task_id, task: TaskUpdate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_task)
     return {'message': f'Task updated {task_id}', 'task': db_task}
+
+
+
+
+
+
+@app.post('/register',response_model=UserResponce)
+def register_user(user:UserCreate, db: Session= Depends(get_db)):
+    db_user = db.query(User).filter(User.username == user.username).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="Username already registered")
+    hashed_password = get_password_hash(user.password)
+    new_user = User(username=user.username,email=user.email, password_hash=hashed_password)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return new_user
+@app.post('/token', response_model=Token)
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(),db:Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == form_data.username).first()
+    if not user or not verify_password(form_data.password, user.password_hash):
+        print('Login user failed')
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    acces_token= create_access_token(data={'sub': user.username}, expires_delta=access_token_expires)
+    return {'access_token': acces_token, 'token_type': 'bearer'}
