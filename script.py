@@ -2,10 +2,9 @@ import google.generativeai as genai
 import os
 from dotenv import load_dotenv
 
-# Загружаем переменные окружения, чтобы получить GEMINI_API_KEY
 load_dotenv()
 
-# Убедитесь, что ваш API ключ загружен
+
 gemini_api_key = os.getenv("GEMINI_API_KEY")
 if not gemini_api_key:
     raise ValueError("GEMINI_API_KEY не найден в переменных окружения. Пожалуйста, добавьте его в ваш файл .env")
@@ -27,6 +26,3 @@ if not found_compatible_model:
 
 print("--- Конец списка моделей ---")
 
-# Теперь, когда вы получили список, вы можете прервать выполнение и изменить вашу функцию get_ai_comment
-# (Если вы вставили этот код в main.py, то остальная часть кода ниже продолжит выполняться,
-# но основной целью было увидеть этот вывод.)
