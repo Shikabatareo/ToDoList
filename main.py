@@ -87,7 +87,7 @@ class Task(Base):
     description = Column(String)
     priority = Column(Integer, default=3)
     due_date = Column(TIMESTAMP)
-    is_completed = Column(Boolean, default=False)
+    is_completed = Column(Boolean, default=False, nullable=False)
     ai_comment = Column(String)
     parent_id = Column(Integer, ForeignKey('tasks.id', ondelete='CASCADE'), nullable=True, index = True)
     owner = relationship('User', back_populates='tasks')
@@ -396,7 +396,7 @@ def create_task(task:TaskCreate, db: Session = Depends(get_db), current_user:Use
     db.add(db_task)
     db.commit()
     db.refresh(db_task)
-    return {'message': 'Task created', 'ai_advice':db_task.ai_comment, 'task': db_task}
+    return db_task
 
 @app.get('/tasks', response_model=list[TaskResponce])
 def get_tasks(db: Session = Depends(get_db), current_user: User= Depends(get_current_user)):
@@ -477,13 +477,14 @@ def update_task(task_id, task: TaskUpdate, db: Session = Depends(get_db),current
         raise HTTPException(status_code=404, detail='Task not found')
     if db_task.user_id !=current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to access this task")
-    for field, value in task.dict().items():
+    update_data = task.dict(exclude_unset=True)
+    for field, value in update_data.items():
         setattr(db_task, field, value)
-    if task.title is not None and task.title !=db_task.title:
-        db_task.ai_comment = get_ai_comment(task.title)
+    if 'title' in update_data and update_data['title'] != db_task.title:
+        db_task.ai_comment = get_ai_comment(update_data['title'])
     db.commit()
     db.refresh(db_task)
-    return {'message': f'Task updated {task_id}', 'task': db_task}
+    return db_task
 
 
 
@@ -505,7 +506,11 @@ def register_user(user:UserCreate, db: Session= Depends(get_db)):
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(),db:Session = Depends(get_db)):
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user or not verify_password(form_data.password, user.password_hash):
-        print('Login user failed')
+        raise HTTPException(
+            status_code=401,
+            detail="Неверный логин или пароль",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     acces_token= create_access_token(data={'sub': user.username}, expires_delta=access_token_expires)
     return {'access_token': acces_token, 'token_type': 'bearer'}

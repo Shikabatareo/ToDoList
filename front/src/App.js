@@ -4,11 +4,14 @@ import './App.css';
 import icoTrash from '../src/img/trash.svg';
 import icoInfo from '../src/img/sangU.svg'
 import icoEdit from '../src/img/edit.svg'
-
+import * as api from './services/api'; 
+import { useAuth } from './context/AuthContext';
+import LoginForm from './components/LoginForm'
 
 
 function App() {
-
+  
+  const { token, logout } = useAuth();
   const API_URL = 'http://localhost:8000'
   const [newTaskTitle,setNewTaskTitle]=useState('')
   const [newTaskPriority,setnewTaskPriority]=useState(3)
@@ -39,10 +42,12 @@ function App() {
     priorityFilter: null,
   })
   useEffect(()=> {
+    if(token) {
     fetchTasks()
     const intervalId = setInterval(fetchTasks,10000)
     return () => clearInterval(intervalId)
-  },[])
+    }
+  },[token])
 
 
    const openSearchForm = () => {
@@ -100,11 +105,7 @@ const closeSearchForm = () => {
     setError(null)
 
     try {
-      const response = await fetch(`${API_URL}/tasks`)
-       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const data = await response.json()
+      const data = await api.getTasks()
       setTasks(data)
     }
     catch(e) {
@@ -121,11 +122,8 @@ const deleteTask = async (task_id)=> {
   setError(null)
 
   try {
-    const responce = await fetch(`${API_URL}/tasks/${task_id}`, {
-      method: 'DELETE',
-    })
+    await api.deleteTask(task_id)
     await fetchTasks()
-
   }
   
   catch(e) {
@@ -183,19 +181,13 @@ const handleSearch = async (e)=> {
       setLoading(false)
       return
     }
+    // description: editTaskDescription,
+    //       priority: parseInt(editTaskPriority) || null,
+    //       due_date: editTaskDueDate || null,
+    //       parent_id: currentTaskToEdit.parent_id || null
     try {
-      const responce = await fetch(`${API_URL}/tasks`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title: newTaskTitle,
-          description: newTaskDescription,
-          priority: parseInt(newTaskPriority) || null,
-          due_date: newDateTask || null,
-          parent_id: parentTaskId || null
-        })
+      await api.createTask({title: newTaskTitle, description: newTaskDescription, priority: parseInt(newTaskPriority)|| null,
+        due_date: newDateTask || null, parent_id: parentTaskId
       })
       await fetchTasks()
       setNewTaskTitle('')
@@ -213,17 +205,14 @@ const handleSearch = async (e)=> {
     setLoading(true)
     setError(null)
     try {
-      const responce = await fetch(`${API_URL}/tasks/${task_id}/complete`, {
-        method: 'PUT',
-      })
-      if(responce.ok){await fetchTasks()
-
+      await api.completeTask(task_id)
+        await fetchTasks()
         if (isSearchMode) {
           setSearchResults(prev=> prev.map(task=> task.id === task_id ? {...task,is_completed: true}: task))
         }
         
-      } else {
-        console.error('Failed to complete task:', responce.status, responce.statusText);
+      else {
+        console.error('Failed to complete task:');
       }
 
 
@@ -260,41 +249,36 @@ const handleSearch = async (e)=> {
       setLoading(false)
     }
   }
-  const handleUpdateTask = async (e)=> {
-    e.preventDefault()
-    setLoading(true)
-    setError(null)
-    if(!editTaskTitle.trim()) {
-      setError('Название задачи не может быть пустым')
-      setLoading(false)
-      return
+ const handleUpdateTask = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+
+    if (!editTaskTitle.trim()) {
+        setError('Название задачи не может быть пустым');
+        setLoading(false);
+        return;
     }
+
     try {
-      const response = await fetch(`${API_URL}/tasks/${currentTaskToEdit.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title: editTaskTitle,
-          description: editTaskDescription,
-          priority: parseInt(editTaskPriority) || null,
-          due_date: editTaskDueDate || null,
-          parent_id: currentTaskToEdit.parent_id || null
-        })
-      })
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      await fetchTasks();
-      closeEditForm();  
-    }
-    catch (e) {
-      setError(`Ошибка при обновлении задачи: ${e.message}`);
+        const taskData = {
+            title: editTaskTitle,
+            description: editTaskDescription,
+            priority: parseInt(editTaskPriority) || null,
+            due_date: editTaskDueDate || null,
+            parent_id: currentTaskToEdit.parent_id || null
+        };
+
+        await api.updateTask(currentTaskToEdit.id, taskData);
+
+        await fetchTasks();
+        closeEditForm();
+    } catch (e) {
+        setError(`Ошибка при обновлении задачи: ${e.message}`);
     } finally {
-      setLoading(false);
+        setLoading(false);
     }
-  }
+}
 
 
   const sortTasks = (taskToSort)=> {
@@ -379,7 +363,9 @@ const renderTasks = (tasksToRender, showSubtasks = true) => {
   
 
 
-
+if(!token) {
+  return <LoginForm/>
+}
 
 
   return (

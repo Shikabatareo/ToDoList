@@ -16,7 +16,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl='token')
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 def get_password_hash(password):
-    pwd_context.hash(password)
+   return pwd_context.hash(password)
 def create_access_token(data,expires_delta: timedelta| None=None):
     to_encode = data.copy()
     if expires_delta:
