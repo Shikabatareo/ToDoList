@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import RegisterForm from './RegisterForm';
 
 const LoginForm = () => {
     const [username,setUsername] = useState('')
@@ -7,6 +8,7 @@ const LoginForm = () => {
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const {login} = useAuth()
+    const [isRegistering, setIsRegistering] = useState(false); 
 
     const handleSubmit = async(e)=> {
         e.preventDefault()
@@ -18,6 +20,9 @@ const LoginForm = () => {
             setError(result.error)
         }
     }
+     if (isRegistering) {
+            return <RegisterForm onRegisterSuccess={()=> setIsRegistering(false)}/>
+        }
     return (
         <div className="container-form">
             <form onSubmit={handleSubmit} className="form">
@@ -40,7 +45,16 @@ const LoginForm = () => {
                     {loading ? 'Вход...' : 'Войти'}
                 </button>
                 {error && <p className="error">{error}</p>}
+                <div className="switch-form">
+                <p>
+                    Нет аккаунта?{' '}
+                    <button onClick={() => setIsRegistering(true)} className="link-button">
+                        Зарегистрироваться
+                    </button>
+                </p>
+            </div>
             </form>
+            
         </div>
     );
 }

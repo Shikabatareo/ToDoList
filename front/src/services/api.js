@@ -26,6 +26,10 @@ const apiFetch = async(endpoint,options={})=> {
    return response.json()
 }
 
+export const register =  (userData) => apiFetch('/register', {
+   method: 'POST',
+   body: JSON.stringify(userData)
+})
 export const getTasks = ()=> apiFetch('/tasks')
 export const createTask = (taskData) => apiFetch('/tasks', {
    method: 'POST',
